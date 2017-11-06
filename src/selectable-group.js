@@ -16,7 +16,9 @@ class SelectableGroup extends Component {
 		this.state = {
 			isBoxSelecting: false,
 			boxWidth: 0,
-			boxHeight: 0
+			boxHeight: 0,
+			scrollLeftShift: 0,
+			scrollTopShift: 0
 		};
 
 		this._mouseDownData = null;
@@ -77,20 +79,31 @@ class SelectableGroup extends Component {
 		findDOMNode(this)[funcName]('mousedown', this._mouseDown);
 	}
 
+	changeScrollOffsets (scrollLeftShift = 0, scrollTopShift = 0) {
+		this.setState({
+			scrollLeftShift,
+			scrollTopShift
+		});
+
+		this._throttledSelect();
+	}
+
 	/**
 	 * Called while moving the mouse with the button down. Changes the boundaries
 	 * of the selection box
 	 */
 	_openSelector (e) {
-		const w = Math.abs(this._mouseDownData.initialW - e.pageX + this._rect.x);
-		const h = Math.abs(this._mouseDownData.initialH - e.pageY + this._rect.y);
+		const horizontalDirection = e.pageX - this._rect.x < this._mouseDownData.initialW;
+		const verticalDirection = e.pageY - this._rect.y < this._mouseDownData.initialH;
 
 		this.setState({
 			isBoxSelecting: true,
-			boxWidth: w,
-			boxHeight: h,
-			boxLeft: Math.min(e.pageX - this._rect.x, this._mouseDownData.initialW),
-			boxTop: Math.min(e.pageY - this._rect.y, this._mouseDownData.initialH)
+			boxWidth: Math.abs(this._mouseDownData.initialW - e.pageX + this._rect.x),
+			boxHeight: Math.abs(this._mouseDownData.initialH - e.pageY + this._rect.y),
+			boxLeft: horizontalDirection ? e.pageX - this._rect.x : this._mouseDownData.initialW,
+			boxTop: verticalDirection ? e.pageY - this._rect.y : this._mouseDownData.initialH,
+			directionX: horizontalDirection ? 1 : -1,
+			directionY: verticalDirection ? 1 : -1
 		});
 
 		this._throttledSelect(e);
@@ -188,10 +201,17 @@ class SelectableGroup extends Component {
 		this._selectElements(e, true);
 
 		this._mouseDownData = null;
+		this._scrollOffsets = {
+			x: 0,
+			y: 0
+		};
+
 		this.setState({
 			isBoxSelecting: false,
 			boxWidth: 0,
-			boxHeight: 0
+			boxHeight: 0,
+			scrollLeftShift: 0,
+			scrollTopShift: 0
 		});
 	}
 
@@ -209,9 +229,9 @@ class SelectableGroup extends Component {
 
 		this._registry.forEach(itemData => {
 			if (
-				itemData.domNode
-				&& doObjectsCollide(_selectbox, itemData.domNode, tolerance)
-				&& !currentItems.includes(itemData.key)
+				itemData.domNode &&
+				doObjectsCollide(_selectbox, itemData.domNode, tolerance) &&
+				!currentItems.includes(itemData.key)
 			) {
 				currentItems.push(itemData.key);
 			}
@@ -230,8 +250,18 @@ class SelectableGroup extends Component {
 	 * @return {ReactComponent}
 	 */
 	render () {
-		const {children, enabled, fixedPosition, className, selectingClassName} = this.props;
-		const {isBoxSelecting, boxLeft, boxTop, boxWidth, boxHeight} = this.state;
+		const {children, enabled, className, selectingClassName} = this.props;
+		const {
+			isBoxSelecting,
+			boxLeft,
+			boxTop,
+			boxWidth,
+			boxHeight,
+			directionX,
+			directionY,
+			scrollLeftShift,
+			scrollTopShift
+		} = this.state;
 		const Component = this.props.component;
 
 		if (!enabled) {
@@ -242,14 +272,23 @@ class SelectableGroup extends Component {
 			);
 		}
 
-		const boxStyle = {
-			left: boxLeft,
-			top: boxTop,
-			width: boxWidth,
-			height: boxHeight,
+		const boxContainerStyle = {
+			left: 0,
+			top: 0,
+			width: '100%',
+			height: '100%',
 			zIndex: 9000,
-			position: fixedPosition ? 'fixed' : 'absolute',
+			overflow: 'hidden',
+			position: 'absolute',
 			cursor: 'default'
+		};
+
+		const boxStyle = {
+			left: boxLeft + (directionX > 0 ? scrollLeftShift : 0),
+			top: boxTop + (directionY > 0 ? scrollTopShift : 0),
+			width: boxWidth - (scrollLeftShift * directionX),
+			height: boxHeight - (scrollTopShift * directionY),
+			position: 'absolute'
 		};
 
 		const spanStyle = {
@@ -276,12 +315,16 @@ class SelectableGroup extends Component {
 				{
 					isBoxSelecting ?
 						<div
-							style={boxStyle}
-							ref="selectbox"
+							style={boxContainerStyle}
 						>
-							<span
-								style={spanStyle}
-							/>
+							<div
+								style={boxStyle}
+								ref='selectbox'
+							>
+                <span
+					style={spanStyle}
+				/>
+							</div>
 						</div>
 						: null
 				}
@@ -345,14 +388,6 @@ SelectableGroup.propTypes = {
 	tolerance: PropTypes.number,
 
 	/**
-	 * In some cases, it the bounding box may need fixed positioning, if your layout
-	 * is relying on fixed positioned elements, for instance.
-	 *
-	 * @type {Boolean}
-	 */
-	fixedPosition: PropTypes.bool,
-
-	/**
 	 * Allows to enable/disable preventing the default action of the onmousedown event (with e.preventDefault).
 	 * True by default. Disable if your app needs to capture this event for other functionalities.
 	 *
@@ -390,7 +425,6 @@ SelectableGroup.propTypes = {
 SelectableGroup.defaultProps = {
 	component: 'div',
 	tolerance: 0,
-	fixedPosition: false,
 	preventDefault: true,
 	enabled: true
 };
